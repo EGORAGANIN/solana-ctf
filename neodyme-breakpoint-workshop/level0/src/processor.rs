@@ -41,6 +41,8 @@ fn initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
 
     assert_eq!(*wallet_info.key, wallet_address);
     assert!(wallet_info.data_is_empty());
+    // @audit-info - authority_info.is_signer == true checked when system_instruction::create_account(authority_info, ...) twice
+    // @audit-issue (INFO) - recommended explicit check authority_info.is_signer
 
     invoke_signed(
         &system_instruction::create_account(
@@ -90,6 +92,8 @@ fn deposit(_program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progr
     let wallet = Wallet::deserialize(&mut &(*wallet_info.data).borrow_mut()[..])?;
 
     assert_eq!(wallet.vault, *vault_info.key);
+    // @audit-issue (LOW) - wallet_info account should has assert!(wallet_info.owner == program_id), or preferred find_program_address
+    // Hacker can be pass fake account with same Wallet data layout.
 
     invoke(
         &system_instruction::transfer(&source_info.key, &vault_info.key, amount),
@@ -107,6 +111,8 @@ fn withdraw(_program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Prog
     let destination_info = next_account_info(account_info_iter)?;
     let wallet = Wallet::deserialize(&mut &(*wallet_info.data).borrow_mut()[..])?;
 
+    // @audit-issue (CRITICAL) - wallet_info account should has assert!(wallet_info.owner == program_id), or preferred find_program_address
+    // Hacker can be pass fake account with same Wallet data layout and still all funds.
     assert!(authority_info.is_signer);
     assert_eq!(wallet.authority, *authority_info.key);
     assert_eq!(wallet.vault, *vault_info.key);
@@ -115,6 +121,8 @@ fn withdraw(_program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Prog
         return Err(ProgramError::InsufficientFunds);
     }
 
+    // @audit-issue (INFO) - recommended using safe math
+    // after updating contract can be underflow/overflow
     **vault_info.lamports.borrow_mut() -= amount;
     **destination_info.lamports.borrow_mut() += amount;
 
