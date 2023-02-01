@@ -69,6 +69,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     let source_info = next_account_info(account_info_iter)?;
 
     assert_eq!(wallet_info.owner, program_id);
+    // @audit-issue (INFO) - recommended explicit check source_info.is_signer
 
     invoke(
         &system_instruction::transfer(&source_info.key, &wallet_info.key, amount),
@@ -94,13 +95,27 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progr
     assert!(authority_info.is_signer, "authority must sign!");
 
     let min_balance = rent.minimum_balance(WALLET_LEN as usize);
+    // @audit-issue (CRITICAL) - required using safe math.
+    // (min_balance + amount) overflow
+    // -= amount underflow
+    // += amount overflow
     if min_balance + amount > **wallet_info.lamports.borrow_mut() {
         return Err(ProgramError::InsufficientFunds);
     }
+    // @audit - hacker stilling calculations for every transaction
+    // min_balance = 0.0011136 SOL = 1_113_600 LAMPORT
+    // deposit = 1_000_000_000_000_000 lamport
+    // wallet_info.lamports = 1_000_000_000_000_000 + 1_113_600 = 1_000_000_001_113_600
+    // 1113600 - u64::MAX = 1113600 + 1 = 1113601
+    // 1113600 + u64::MAX = 1113600 - 1 = 1113599
+    // 1113600 - (u64::MAX - 1113600 - 1) = 1113600 + 1113600 = 2227200
+    // 1113600 + (u64::MAX - 1113600 - 1) = 1113600 - 1113600 = 0
+    // after contract execution Solana runtime check balances amount balances before and after
 
     **wallet_info.lamports.borrow_mut() -= amount;
     **destination_info.lamports.borrow_mut() += amount;
 
+    // @audit-issue (LOW) - useless serialization, because we don't changing Wallet account
     wallet
         .serialize(&mut &mut (*wallet_info.data).borrow_mut()[..])
         .unwrap();
