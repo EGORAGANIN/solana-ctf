@@ -48,6 +48,10 @@ pub enum TipInstruction {
     Withdraw { amount: u64 },
 }
 
+// @audit-issue (CRITICAL) - Structure deserialization by layout from data.
+// Contract has TipPool, Vault with similar layout, so account substitution attack is possible.
+// TipPool can deserialize from Vault account.
+// Required using ID/discriminator in layout
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, BorshSerialize, BorshDeserialize)]
 pub struct TipPool {
@@ -104,6 +108,7 @@ pub fn create_pool(
     withdraw_authority: Pubkey,
     pool_address: Pubkey,
 ) -> Instruction {
+    // @audit - possible account substitution attack for vault_address, pool_address
     Instruction {
         program_id: tip_program,
         accounts: vec![
@@ -122,6 +127,7 @@ pub fn tip(
     source: Pubkey,
     amount: u64,
 ) -> Instruction {
+    // @audit - possible account substitution attack for vault_address, pool_address
     Instruction {
         program_id: tip_program,
         accounts: vec![
@@ -141,6 +147,7 @@ pub fn withdraw(
     withdraw_authority: Pubkey,
     amount: u64,
 ) -> Instruction {
+    // @audit - possible account substitution attack for vault_address, pool_address
     Instruction {
         program_id: tip_program,
         accounts: vec![
