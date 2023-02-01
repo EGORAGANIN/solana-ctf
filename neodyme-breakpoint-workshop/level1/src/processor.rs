@@ -69,6 +69,7 @@ fn deposit(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progra
     let source_info = next_account_info(account_info_iter)?;
 
     assert_eq!(wallet_info.owner, program_id);
+    // @audit-issue (INFO) - recommended explicit check source_info.is_signer
 
     invoke(
         &system_instruction::transfer(&source_info.key, &wallet_info.key, amount),
@@ -88,14 +89,20 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progr
 
     assert_eq!(wallet_info.owner, program_id);
     assert_eq!(wallet.authority, *authority_info.key);
+    // @audit-issue (CRITICAL) - required restrict withdrawals for unauthorised user
+    // assert_eq(authority_info.is_signer)
+    // Hacker can be pass account without authority signature and withdraw funds
 
     if amount > **wallet_info.lamports.borrow_mut() {
         return Err(ProgramError::InsufficientFunds);
     }
 
+    // @audit-issue (INFO) - recommended using safe math
+    // after updating contract can be underflow/overflow
     **wallet_info.lamports.borrow_mut() -= amount;
     **destination_info.lamports.borrow_mut() += amount;
 
+    // @audit-issue (LOW) - useless serialization, because we don't changing Wallet account
     wallet
         .serialize(&mut &mut (*wallet_info.data).borrow_mut()[..])
         .unwrap();

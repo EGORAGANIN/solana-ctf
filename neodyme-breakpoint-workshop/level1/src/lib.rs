@@ -35,6 +35,9 @@ pub enum WalletInstruction {
     Withdraw { amount: u64 },
 }
 
+// @audit-ok - Structure deserialization by layout from data.
+// Contract has single state account, so account substitution is not possible.
+// @audit-issue (INFO) - recommended using ID/discriminator for differ layout.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, BorshSerialize, BorshDeserialize)]
 pub struct Wallet {

