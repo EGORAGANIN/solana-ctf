@@ -37,16 +37,23 @@ fn initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
     let owner = next_account_info(account_info_iter)?;
     let mint = next_account_info(account_info_iter)?;
     let rent_info = next_account_info(account_info_iter)?;
+    // @audit-issue (MEDIUM) - program expected spl_token program, but we can be substitute as fake program
+    // It's not problem for initialize instruction, but may become a problem in the future
+    // required add check assert_eq!(spl_token.key, spl_token::id());
     let spl_token = next_account_info(account_info_iter)?;
 
+    // @audit-info - PDA -> owner, wallet_program
     let (wallet_address, wallet_seed) = get_wallet_address(owner.key, program_id);
+    // @audit-info - authority single for program
     let (authority_address, _) = get_authority(program_id);
     let rent = Rent::from_account_info(rent_info)?;
 
-    assert_eq!(wallet_info.key, &wallet_address);
-    assert_eq!(authority_info.key, &authority_address);
-    assert!(owner.is_signer, "owner must sign!");
+    assert_eq!(wallet_info.key, &wallet_address); // @audit-info - exclude substitution wallet_info, because calculation PDA wallet_address
+    assert_eq!(authority_info.key, &authority_address); // @audit-info - exclude substitution authority_info, because calculation PDA authority_address
+    assert!(owner.is_signer, "owner must sign!"); // @audit-info - bind owner signature and wallet_info
 
+    // @audit - when account create spl_token program owner wallet_address
+    // fake program can close any account which owned, transfer rent funds to hacker
     invoke_signed(
         &system_instruction::create_account(
             &owner.key,
@@ -59,6 +66,7 @@ fn initialize(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
         &[&[&owner.key.to_bytes(), &[wallet_seed]]],
     )?;
 
+    // @audit - initialize_account not check token_program_id
     invoke(
         &spl_token::instruction::initialize_account(
             &spl_token.key,
@@ -85,17 +93,23 @@ fn deposit(_program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progr
     let source_info = next_account_info(account_info_iter)?;
     let user_authority_info = next_account_info(account_info_iter)?;
     let mint = next_account_info(account_info_iter)?;
+    // @audit-issue (MEDIUM) - program expected spl_token program, but we can be substitute as fake program
+    // It's not problem for deposit instruction, but may become a problem in the future
+    // required add check assert_eq!(spl_token.key, spl_token::id());
     let spl_token = next_account_info(account_info_iter)?;
 
+    // @audit-issue (LOW) - direct read raw data is risk
+    // recommended deserialize structure or check mint.owner == spl_token.key, Mint::LEN == mint.data.len()
     let decimals = mint.data.borrow()[44];
 
+    // @audit - transfer_checked not check token_program_id
     invoke(
         &spl_token::instruction::transfer_checked(
             &spl_token.key,
-            &source_info.key,
-            mint.key,
-            wallet_info.key,
-            user_authority_info.key,
+            &source_info.key, // w
+            mint.key, // r
+            wallet_info.key, // w
+            user_authority_info.key, // r, s
             &[],
             amount,
             decimals,
@@ -125,19 +139,26 @@ fn withdraw(program_id: &Pubkey, accounts: &[AccountInfo], amount: u64) -> Progr
     let (wallet_address, _) = get_wallet_address(owner_info.key, program_id);
     let (authority_address, authority_seed) = get_authority(program_id);
 
-    assert_eq!(wallet_info.key, &wallet_address);
-    assert_eq!(authority_info.key, &authority_address);
-    assert!(owner_info.is_signer, "owner must sign!");
+    assert_eq!(wallet_info.key, &wallet_address); // @audit-info - exclude substitution wallet_info, because calculation PDA wallet_address
+    assert_eq!(authority_info.key, &authority_address); // @audit-info - exclude substitution authority_info, because calculation PDA authority_address
+    assert!(owner_info.is_signer, "owner must sign!"); // @audit-info - bind owner signature and wallet_info
 
+    // @audit-issue (LOW) - direct read raw data is risk
+    // recommended deserialize structure or check mint.owner == spl_token.key, Mint::LEN == mint.data.len()
     let decimals = mint.data.borrow()[44];
 
+    // @audit-info - we can't proxy transfer inside fake spl_token program,
+    // because we must pass all accounts for transfer via real spl_token program
+    // @audit - try changing owner authority_info inside fake program
+    // @audit-issue (CRITICAL) - transfer tokens inside fake program using transfer instruction
+    // required add check assert_eq!(spl_token.key, spl_token::id());
     invoke_signed(
         &spl_token::instruction::transfer_checked(
             &spl_token.key,
-            &wallet_info.key,
-            mint.key,
-            destination_info.key,
-            authority_info.key,
+            &wallet_info.key, // w
+            mint.key, // r
+            destination_info.key, // w
+            authority_info.key, // r, s
             &[],
             amount,
             decimals,

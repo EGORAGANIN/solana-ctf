@@ -52,10 +52,14 @@ pub mod processor;
 use processor::process_instruction;
 entrypoint!(process_instruction);
 
+// @audit-info - PDA bind owner, wallet_program
+// unique for owner
 pub fn get_wallet_address(owner: &Pubkey, wallet_program: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[&owner.to_bytes()], wallet_program)
 }
 
+// @audit-info - PDA bind owner, wallet_program
+// single for program
 pub fn get_authority(wallet_program: &Pubkey) -> (Pubkey, u8) {
     Pubkey::find_program_address(&[], wallet_program)
 }

